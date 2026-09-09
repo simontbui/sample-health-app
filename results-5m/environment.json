@@ -1,0 +1,118 @@
+{
+  "started_at_utc": "2026-09-09T18:57:50.888985+00:00",
+  "postgres": "PostgreSQL 17.11 (Debian 17.11-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "settings": [
+    {
+      "name": "effective_cache_size",
+      "setting": "524288",
+      "unit": "8kB"
+    },
+    {
+      "name": "jit",
+      "setting": "on",
+      "unit": null
+    },
+    {
+      "name": "max_parallel_workers_per_gather",
+      "setting": "2",
+      "unit": null
+    },
+    {
+      "name": "random_page_cost",
+      "setting": "4",
+      "unit": null
+    },
+    {
+      "name": "shared_buffers",
+      "setting": "32768",
+      "unit": "8kB"
+    },
+    {
+      "name": "track_io_timing",
+      "setting": "on",
+      "unit": null
+    },
+    {
+      "name": "work_mem",
+      "setting": "16384",
+      "unit": "kB"
+    }
+  ],
+  "counts": {
+    "files": 2500000,
+    "documents": 5000000,
+    "medications": 15000000,
+    "diagnoses": 20000000,
+    "encounters": 10000000
+  },
+  "storage": [
+    {
+      "schemaname": "audit",
+      "relname": "edit",
+      "bytes": 16384
+    },
+    {
+      "schemaname": "clinical",
+      "relname": "diagnosis",
+      "bytes": 3878191104
+    },
+    {
+      "schemaname": "clinical",
+      "relname": "document",
+      "bytes": 1261404160
+    },
+    {
+      "schemaname": "clinical",
+      "relname": "encounter",
+      "bytes": 1470922752
+    },
+    {
+      "schemaname": "clinical",
+      "relname": "medication",
+      "bytes": 2931630080
+    },
+    {
+      "schemaname": "ingest",
+      "relname": "file",
+      "bytes": 466501632
+    },
+    {
+      "schemaname": "ingest",
+      "relname": "large_benchmark",
+      "bytes": 65536
+    },
+    {
+      "schemaname": "ingest",
+      "relname": "parse_run",
+      "bytes": 40960
+    },
+    {
+      "schemaname": "separated",
+      "relname": "diagnosis",
+      "bytes": 3580583936
+    },
+    {
+      "schemaname": "separated",
+      "relname": "diagnosis_confidence",
+      "bytes": 2124005376
+    },
+    {
+      "schemaname": "separated",
+      "relname": "medication",
+      "bytes": 2794954752
+    },
+    {
+      "schemaname": "separated",
+      "relname": "medication_confidence",
+      "bytes": 1119862784
+    }
+  ],
+  "docker_image": "[{\"ID\":\"sha256:67f41722b7a8cbdb868a44a4995c846eddfdc2973bccb291ce937dce88ad5675\",\"ContainerName\":\"postgres-benchmark-db-1\",\"Repository\":\"postgres\",\"Tag\":\"17\",\"Platform\":\"linux/amd64\",\"Size\":639658503,\"Created\":\"2026-08-25T00:41:57.916686795Z\",\"LastTagTime\":\"2026-09-09T18:15:00.271559991Z\"}]",
+  "client_host": {
+    "system": "Linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "logical_cpus": 16
+  },
+  "repetitions": 10,
+  "method": "One explicit warm-up per query; alternating layout order; server EXPLAIN execution time; sequential clients; no cold-cache claim."
+}
