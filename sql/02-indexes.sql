@@ -1,0 +1,10 @@
+SET search_path TO public;
+CREATE INDEX IF NOT EXISTS document_file ON document(file_id);
+CREATE INDEX IF NOT EXISTS document_member ON document(member_id,id);
+CREATE INDEX IF NOT EXISTS encounter_document ON encounter(document_id,id);
+CREATE INDEX IF NOT EXISTS lab_encounter ON lab(encounter_id);
+CREATE INDEX IF NOT EXISTS vital_encounter ON vital(encounter_id);
+CREATE INDEX IF NOT EXISTS medication_encounter ON medication(encounter_id);
+CREATE INDEX IF NOT EXISTS diagnosis_encounter ON diagnosis(encounter_id);
+CREATE INDEX IF NOT EXISTS diagnosis_search ON diagnosis(diagnosis_code,diagnosis_code_conf) INCLUDE(encounter_id);
+CREATE INDEX IF NOT EXISTS medication_search ON medication(medication_name,encounter_id);

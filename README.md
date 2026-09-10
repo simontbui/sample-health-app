@@ -1,106 +1,179 @@
-# PostgreSQL document query benchmark
+# Windows PostgreSQL 17 document benchmark
 
-For the new **5 million documents** dataset with 15M medications, 20M diagnoses and 10M encounters, see [LARGE-BENCHMARK.md](LARGE-BENCHMARK.md). The original smaller benchmark and its historical measurements remain documented below.
+Run against PostgreSQL 17 installed locally on Windows 11. All commands use PowerShell and your existing PostgreSQL service. The default dataset contains **5,000,000 documents** and **92,500,000 total business rows**.
 
-Use relational child tables with confidence columns beside each extracted value. For the requested diagnosis-code + confidence predicate, this supports a single compound index and avoids joining each diagnosis to its confidence. This is a workload-based recommendation, not a universal promise; the included comparison measures a typed, separate confidence-table design on identical data.
+## One-command setup
 
-## Start in Ubuntu / WSL
+With the PostgreSQL Windows service running, open PowerShell and run:
 
-Docker Engine and the Compose plugin must be installed. If needed, `sudo bash scripts/install-docker.sh` installs them from Docker's official Ubuntu repository. Docker Desktop with Ubuntu WSL integration also works; do not install a second engine if you already use Desktop.
-
-```bash
-cd /mnt/c/repos/sample-health-app
-sudo bash scripts/setup.sh
-sudo bash scripts/benchmark.sh 10
+```powershell
+cd C:\repos\sample-health-app
+.\scripts\setup.ps1
 ```
 
-Omit `sudo` when your user already has Docker access. Scripts require Bash and Python 3. The image is PostgreSQL 17, an Azure Flexible Server supported major version. The image tag receives minor updates; results/environment.json records the tested server version and image ID. Pin an image digest for repeatable comparisons over time.
+The script prompts for your installation's `postgres` password, creates `docbench` if missing, creates tables in the default `public` schema, loads **5 million documents and their related rows**, builds indexes, and verifies counts. It finds Python bundled with pgAdmin automatically. Existing benchmark loads resume with matching parameters; conflicting objects are not overwritten. It restores your session's connection/password environment variables when finished. Measurements are a separate step.
 
-The default is **1,000,000 business rows**: 100,000 files, 200,000 documents, 300,000 medications, 300,000 diagnoses, and 100,000 encounters. The optional `separated` comparison adds 1,200,000 rows. Parse runs and edit audit begin empty. Data is synthetic and generated with a fixed random seed. Names, codes and NPIs are test labels, not clinical reference data.
+Preview without connecting, or create a small separate database first:
 
-To test **1,000,000 documents / 5,000,000 business rows**, use a new Compose project (separate database volume):
-
-```bash
-sudo env COMPOSE_PROJECT_NAME=docbench-large bash scripts/setup.sh 1000000
+```powershell
+.\scripts\setup.ps1 -Plan
+.\scripts\setup.ps1 -Database docbench_smoke -Documents 800 -BatchSize 200
 ```
 
-Stop the original container first (`sudo docker compose stop`) because both use port 55432. Use the same COMPOSE_PROJECT_NAME on all later commands for the large instance. Setup refuses to reseed an existing schema. It does not repair a partially failed load; inspect the failure and use a new project/volume for a fresh attempt. Counts must be multiples of four to preserve exact totals.
+Optional parameters: `-Port 5432`, `-UserName postgres`, `-PostgresBin 'C:\Program Files\PostgreSQL\17\bin'`, and `-PythonPath 'C:\path\to\python.exe'`. Use `-UseExistingAuthentication` to skip the password prompt and use your existing `PGPASSWORD` or password file; password-file authentication needs entries for both `postgres` (database creation) and the target database. The script uses the existing service and does not install or start PostgreSQL.
 
-```bash
-sudo docker compose stop           # preserve data
-sudo docker compose up -d --wait   # resume
-sudo docker compose logs db       # startup diagnostics
+If Windows blocks local scripts, launch just this script with a process-scoped execution policy:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 ```
 
-No automatic volume deletion or reseeding is performed. PostgreSQL data lives in a Docker named volume in Linux; SQL files are mounted read-only from this directory. Durability settings remain enabled. The supplied password is for this local synthetic benchmark only; the exposed port binds to loopback.
+## Manual setup in PowerShell
 
-## Connect from the Microsoft PostgreSQL extension in VS Code
+Confirm the PostgreSQL service is running in Windows Services or with `Get-Service *postgres*`. Open PowerShell in this repository:
 
-Add a PostgreSQL connection with these settings:
+```powershell
+cd C:\repos\sample-health-app
+$env:PSQL = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
+$env:PGHOST = '127.0.0.1'
+$env:PGPORT = '5432'
+$env:PGUSER = 'postgres'
+$env:PGDATABASE = 'docbench'
+# Use Python 3.10+; pgAdmin includes this runtime with the standard installer:
+$python = 'C:\Program Files\PostgreSQL\17\pgAdmin 4\python\python.exe'
+& $python --version
+```
+
+Adjust the executable paths and port to your installation. If pgAdmin's Python is absent, use an installed Python 3.10+ executable. No pip packages are required.
+
+Create an empty benchmark database (the prompt asks for the PostgreSQL password you chose during installation):
+
+```powershell
+& $env:PSQL -X -h $env:PGHOST -p $env:PGPORT -U $env:PGUSER -d postgres -W -v ON_ERROR_STOP=1 -c 'CREATE DATABASE docbench;'
+```
+
+If the database already exists, inspect it before loading. The loader creates unqualified tables in `public` and refuses to overwrite conflicting objects. For another dataset, create a new empty database and change `$env:PGDATABASE`. There is no automatic database deletion or reset. The installation administrator is convenient for this local synthetic benchmark; an existing database owner account also works.
+
+Authenticate repeated script connections using `%APPDATA%\postgresql\pgpass.conf`. Create the directory if needed and save a line like this (replace the password):
+
+```text
+127.0.0.1:5432:docbench:postgres:YOUR_INSTALLATION_PASSWORD
+```
+
+Save as `pgpass.conf`, not `.txt`, restrict access to your Windows account, and never commit it. Escape `:` and `\` in passwords with `\`. Alternatively, set a password for the current PowerShell session without putting it in command history:
+
+```powershell
+$credential = Get-Credential -UserName $env:PGUSER -Message 'Local PostgreSQL password'
+$env:PGPASSWORD = $credential.GetNetworkCredential().Password
+& $env:PSQL -X -w -h $env:PGHOST -p $env:PGPORT -U $env:PGUSER -d $env:PGDATABASE -c 'SELECT version(), current_database();'
+```
+
+Child processes inherit this variable. After use, clear it with `Remove-Item Env:PGPASSWORD`. Passwords saved in VS Code or pgAdmin do not automatically authenticate the scripts. See the [PostgreSQL password-file documentation](https://www.postgresql.org/docs/17/libpq-pgpass.html).
+
+Preview counts, load, then measure after setup exits successfully:
+
+```powershell
+& $python scripts/setup.py --plan
+& $python scripts/setup.py
+& $python scripts/benchmark.py --repeats 10
+```
+
+The loader commits every 20,000 documents and their children. Re-run the same setup command after interruption: rows and progress commit together, and indexing/vacuum can resume. Keep the document count and batch size unchanged. A database advisory lock prevents concurrent loaders. Do not edit the data during loading or measurement.
+
+For a smoke run, first create a **separate empty database** named `docbench_smoke` using the create command above with that name, then:
+
+```powershell
+$env:PGDATABASE = 'docbench_smoke'
+& $python scripts/setup.py --documents 800 --batch-size 200
+& $python scripts/benchmark.py --repeats 2
+$env:PGDATABASE = 'docbench'
+```
+
+Add a password-file entry for the smoke database if using that method. Counts and batch sizes must be positive even numbers. Explicit synthetic IDs are supplied by the loader; they are not application identity sequences.
+
+## Connect with VS Code's PostgreSQL extension
+
+Install **PostgreSQL by Microsoft** (`ms-ossdata.vscode-pgsql`). Open its PostgreSQL view and choose **Add Connection** / the plus button. Use these settings:
 
 | Setting | Value |
 |---|---|
+| Name | Local document benchmark |
 | Server / host | `127.0.0.1` |
-| Port | `55432` |
-| Database | `docbench` |
+| Port | `5432` or your installation's port |
 | Authentication | Password |
-| User | `bench` |
-| Password | `local-bench-only` |
-| SSL mode | Disable (local container has no TLS configured) |
+| User | `postgres` or your selected database owner |
+| Password | Your local PostgreSQL account password |
+| Database | `docbench` |
+| SSL mode | `Prefer`; use `Require` only with a TLS-configured server |
 
-Open `sql/05-queries.sql`, select a statement and execute it. These are plain SQL; the setup/verification files contain psql commands and should be run by the shell scripts. Remove the EXPLAIN line to retrieve actual matching documents. The count query measures the whole match set; the paged query measures the first 50. Test later pages with `d.id > last_seen_id` as well.
+Connect and select `docbench`. Refresh the explorer after loading; expand **Schemas → public → Tables**. Open [sql/03-queries.sql](sql/03-queries.sql), select a statement, and execute it against that connection. Remove `EXPLAIN` to display matching documents. Run setup and benchmark scripts from PowerShell.
 
-Windows normally forwards localhost to WSL. If your configuration does not, use VS Code attached to Ubuntu through Remote–WSL and connect there to localhost:55432. Keep the container loopback binding. Azure connections instead need their actual endpoint and TLS settings.
+See Microsoft's [connection instructions](https://learn.microsoft.com/en-us/azure/postgresql/development/vs-code-extension/connections).
 
-## Model and confidence decisions
+## Connect with pgAdmin 4
+
+1. Open pgAdmin. Right-click **Servers → Register → Server**. On **General**, name it `Local document benchmark`.
+2. On **Connection**, enter host `127.0.0.1`, port `5432`, maintenance database `docbench`, username `postgres`, and your PostgreSQL password. Save the password if desired. Leave SSL mode at `Prefer` unless your installation needs another setting; recent versions expose it in connection parameters. Click **Save**.
+3. Expand **Databases → docbench → Schemas → public → Tables**. Refresh if necessary.
+4. Right-click `docbench` and choose **Query Tool**. Open [sql/03-queries.sql](sql/03-queries.sql) and execute a selected statement. For table previews, use **View/Edit Data → First 100 Rows**.
+
+The pgAdmin master password, if requested, protects saved credentials and is separate from the database password. See the official [server dialog documentation](https://www.pgadmin.org/docs/pgadmin4/latest/server_dialog.html).
+
+For connection refused errors, check the service and port. Authentication failures require the PostgreSQL account password. Missing tables usually mean the wrong database, incomplete setup, or an explorer that needs refreshing.
+
+## Schema
+
+All benchmark tables and the `confidence` domain live in PostgreSQL's default `public` schema. Application queries use plain names such as `SELECT * FROM document;` and `SELECT * FROM file;`. No custom schemas are created. The Python scripts explicitly select `public` for each connection, and the PowerShell setup configures it as the database's default search path for new connections. If your SQL client or role overrides that setting, run `SET search_path TO public;` in that session.
+
+This layout requires a fresh database; it does not migrate an earlier layout. The document count, relationships and confidence rules are unchanged.
 
 ```mermaid
 erDiagram
-  FILE ||--o{ DOCUMENT : contains
-  FILE ||--o{ PARSE_RUN : parsed_by
-  DOCUMENT ||--o{ MEDICATION : contains
-  DOCUMENT ||--o{ DIAGNOSIS : contains
-  DOCUMENT ||--o{ ENCOUNTER : contains
+    FILE ||--o{ DOCUMENT : contains
+    DOCUMENT ||--o{ ENCOUNTER : contains
+    ENCOUNTER ||--o{ LAB : contains
+    ENCOUNTER ||--o{ VITAL : contains
+    ENCOUNTER ||--o{ MEDICATION : contains
+    ENCOUNTER ||--o{ DIAGNOSIS : contains
 ```
 
-- `ingest.file`: immutable blob URI + version identify a source. Multiple document rows reference a file.
-- `ingest.parse_run`: unique pipeline idempotency key, model version, and URI to immutable raw JSON. A composite foreign key ensures a document's run belongs to its file. Synthetic documents omit parse runs to keep the core row count clear.
-- `clinical.document`: extracted member identifier/names and provider name/NPI. These are observations from a document. Do not use uncertain AI identifiers as foreign keys to a canonical member/provider master. Add separately resolved master IDs later, preserving extracted text and its confidence. Here “member” is interpreted as the member fields listed; add another value/confidence pair if it denotes an independent attribute.
-- Child tables: one row per extracted medication, diagnosis, or encounter, not arrays or repeated columns. `source_item_key` is pipeline metadata rather than an AI attribute. Unique parent/source keys provide stable item identity.
-- Every modeled extracted attribute has a sibling `_conf`. Structural IDs, version counters, timestamps and ingestion metadata do not. Confidence is `numeric(5,4)` constrained to [0,1]; NULL means unknown/not supplied and does not pass `> 0.65`. Four decimals avoid rounding all AI output to two decimals. Validate original JSON before numeric conversion because declared precision rounds on assignment. If actual scores need more precision, widen the type. `real` saves space but has approximate boundaries; scaled integers are another option when score resolution is fixed.
-- Medication name equality is exact and case-sensitive. Establish a canonical search key or medication coding system if equivalent names/case must match, while retaining raw extraction. Diagnosis code system is stored; include it in production predicates/indexes if multiple systems coexist. This seed uses one system.
+[sql/01-schema.sql](sql/01-schema.sql) defines non-null parent foreign keys. Each child belongs to exactly one parent; a parent may have zero or more children. Labs, vitals, medications and diagnoses reach documents through encounters and do not duplicate `document_id`.
 
-The alternate `separated` schema splits medication/diagnosis confidence into typed one-to-one tables keyed by the child ID. It includes foreign keys and comparable lookup indexes. It shares document parents and is an immutable comparison snapshot, not a synchronized alternative application model. There is no inherent normalization requirement to split confidence: both value and score depend on the same entity row. A generic `(entity_type, entity_id, attribute_name, confidence)` table usually adds rows, joins, and harder referential integrity. It may help highly dynamic attributes, but is not the recommended hot query path here.
+Every parsed non-key attribute has an adjacent `<attribute>_conf`: member fields, document type, provider fields, encounter attributes, laboratory results, vital measurements, medication attributes and diagnosis attributes. Extracted `member_id` is text, not a foreign key. Exceptions are primary/foreign keys, system-generated file URI/ingestion timestamp, and loader checkpoint metadata because those are not AI observations. Unrelated parse-run and editing/audit infrastructure is omitted.
 
-Use JSONB or immutable blob JSON for raw output and infrequently queried evolving fields; project frequently filtered attributes into typed columns. Do not store only the full response in JSONB and expect this relational benchmark's timings. A very wide, sparse document model can warrant vertical splitting of cold fields, measured against actual reads.
+Confidence is a shared `numeric(3,2)` domain constrained to **0.00–1.00 inclusive**. NULL means unknown and does not pass numeric thresholds. PostgreSQL rounds to two decimals before the domain check; validate original parser output before conversion. A score of `0.65` does not pass `> 0.65`. Value and confidence can independently be NULL: a parser may assess confidence in an absent value. No PDF parser is included.
 
-## Query and index design
+## Dataset and storage
 
-The two EXISTS predicates mean “at least one matching diagnosis and at least one matching medication in the same document.” They do not require a clinical linkage or the same encounter. Both diagnosis code and confidence are checked on the **same diagnosis row**. This avoids document duplication and the child-row multiplication of joining all three child tables at once.
+| Table | Default rows | Fanout |
+|---|---:|---|
+| `file` | 2,500,000 | 2 documents per file |
+| `document` | 5,000,000 | 2 encounters per document |
+| `encounter` | 10,000,000 | Parent of clinical observations |
+| `lab` | 20,000,000 | 2 per encounter |
+| `vital` | 20,000,000 | 2 per encounter |
+| `medication` | 15,000,000 | 1 for odd encounters; 2 for even encounters |
+| `diagnosis` | 20,000,000 | 2 per encounter |
+| **Total business rows** | **92,500,000** | Plus one loader checkpoint |
 
-The initial diagnosis index is `(diagnosis_code, diagnosis_code_conf) INCLUDE(document_id)`; medication uses `(medication_name, document_id)`. Existing unique parent/source-key indexes support child lookup by document, and document lookup by file. A member index supports exact member lookup. These are starting indexes, not an instruction to index every field/confidence pair.
+Deterministic arithmetic generates the same values for the same IDs regardless of batch size. Simvastatin occurs in 10% of medication rows, and E11.9 in 12% of diagnosis rows. Patterns have artificial correlations and fixed fanout; they do not model clinical prevalence or parser calibration. PDF binaries, document bodies and raw parser JSON are excluded.
 
-For highly selective filters the planner can start at the diagnosis index; for paged searches it may scan ordered documents and probe child rows. Inspect the actual plans. If late pages need too many probes, test a document-leading index such as `(document_id, diagnosis_code, diagnosis_code_conf)` against its added write/storage cost. A partial index at a fixed confidence threshold can help a fixed workflow, but is less flexible for arbitrary thresholds and parameterized plans. Do not partition merely because there are a million rows; introduce partitioning only for useful pruning or lifecycle requirements. Tenant filtering, if applicable, must be added consistently to keys, predicates, and indexes before production use.
+The full dataset needs substantial disk space for 92.5M rows, indexes, WAL and index-build temporary files. Full-scale storage and runtime have not been measured. Use the smoke load and a larger pilot to estimate table/index storage and leave extra space for WAL and temporary work. As the installation administrator, `SHOW data_directory;` identifies the drive to check. Server memory/durability settings are unchanged. Loading may take considerable time; monitor the console or `SELECT * FROM benchmark_state;` for committed progress.
 
-## Pipeline and editing
+## Queries and measurements
 
-Batch JSON mapping in the pipeline; use COPY into staging tables and then transactional INSERT/UPSERT into the typed model for large loads. Create a parse_run using the source version + processing identifier as an idempotency key, insert documents and children within a transaction, and acknowledge completion only after commit. Repeating an idempotency key should return the existing run, not reapply it. The benchmark supplies the schema, not a service-specific JSON mapper.
+Searches return documents where a diagnosis above the confidence threshold and simvastatin occur in the **same encounter**. Nested `EXISTS` prevents duplicate documents and child-row multiplication. The six scenarios are full count, first 50 documents, a page after 90% of document IDs, high confidence, a rare code, and a nonexistent code. Labs/vitals are loaded, indexed and verified but are not search filters in these scenarios.
 
-Raw JSON should be immutable and retain original model confidence. An AI score of 1 and a human-confirmed value both satisfy the requested effective-confidence convention, so confidence alone is not provenance. `audit.edit` preserves actor, before/after values and scores for human UPDATEs. `sql/07-edit-example.sql` demonstrates transaction-local actor tagging, automatic confidence=1 for changed attributes, and optimistic version checking. Explicitly set `_conf=1` to confirm an unchanged field. Human clearing of a value also gets confidence=1, meaning the absence was confirmed. The example rolls back.
+[sql/02-indexes.sql](sql/02-indexes.sql) indexes parent foreign keys, member lookup, diagnosis code/confidence, and medication name/encounter. After loading, setup builds indexes, runs `VACUUM ANALYZE`, checks exact table counts, and samples encounter fanout across the ID range. Foreign keys enforce referential integrity on every inserted row.
 
-Only a trusted backend may assign `app.actor`; the setting is not authentication. The benchmark connection is an administrative role for testing, not a production authorization model. Production needs constrained API roles, authenticated actor propagation, and protected audit writes. Direct inserts are treated as pipeline inserts; human-created rows must explicitly supply confirmed scores through their API. Do not allow parser reruns to overwrite reviewed values: ingest reruns as new observations and reconcile them using explicit per-field review state or an override table. The trigger alone is not a rerun merge policy. Preserve review state separately from confidence; model confidence may also be 1.
+Each measurement run creates a timestamped directory under ignored `results/`, with `environment.json` (counts, settings, storage), `summary.csv`, `samples.json`, and JSON execution plans. No results are prefilled. One warm-up precedes measured sequential repetitions of each query. Server execution times exclude process startup, transfer and UI rendering. Ten samples give only a descriptive p95. These are local warm-cache measurements, not cold-cache or concurrent throughput measurements or production sizing guarantees. See [PostgreSQL EXPLAIN](https://www.postgresql.org/docs/17/using-explain.html).
 
-## Measure and interpret
+## Developer verification
 
-`benchmark.sh` checks identical results, warms each query, alternates layout order, then captures repeated server execution timings for common count, first page, high confidence, rare code, and no match. It saves CSV timings, JSON query plans with buffers, version/settings, and table/index sizes under `results/`. All tests run sequentially with one client; this is not a concurrent throughput test. p95 from ten samples is descriptive and too small for an SLO claim. Increase repetitions and add a production-shaped concurrent load before sizing Azure.
+```powershell
+& $python -m unittest discover -s scripts -p 'test_*.py'
+# Point PGDATABASE at a separate EMPTY test database first:
+& $python scripts/test_integration.py
+```
 
-`EXPLAIN ANALYZE` runs the query but does not include transferring/rendering all result rows in the application. The recorded times exclude launching psql and Docker. Buffer hits versus reads, heap fetches, spill/sort behavior and estimated versus actual rows explain differences. VACUUM ANALYZE after seeding permits index-only scans; frequent edits and ingest can change that. Warm-cache tests are not cold-cache tests, and restarting a container does not clear the Linux filesystem cache.
-
-This seed varies fanout and independently draws medication/diagnosis labels; fanout itself follows a simple deterministic pattern, confidence is uniform, and there are no large document bodies. Real distributions may be skewed and diagnoses/medications correlated. Validate with realistic row widths, confidence distribution, tenant size, selectivity, concurrent writes, and late-page access. WSL results are comparative local evidence, not Azure latency estimates. Re-run on the target Azure tier/storage with the same PostgreSQL major, settings and indexes, and measure end-to-end application latency.
-
-## References
-
-- [PostgreSQL multicolumn indexes](https://www.postgresql.org/docs/17/indexes-multicolumn.html)
-- [PostgreSQL EXPLAIN](https://www.postgresql.org/docs/17/using-explain.html)
-- [Azure supported PostgreSQL versions](https://learn.microsoft.com/en-us/azure/postgresql/configure-maintain/concepts-supported-versions)
-- [Docker Engine installation on Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
+Integration checks require an empty `public` schema, load a small fixture, check constraints and resume behavior, and remove only their own tables and confidence domain on success. They preserve the `public` schema. Use a dedicated test database.
